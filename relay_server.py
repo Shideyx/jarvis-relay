@@ -1,17 +1,15 @@
 # relay_server.py — Jarvis Relay Server
-# Deploy on Render/Railway — bridges PC and mobile app
 import asyncio
 import json
 import os
 import websockets
 
-_pc = None  # PC connection
-_phones = set()  # Mobile connections
+_pc = None
+_phones = set()
 
 async def handler(websocket):
     global _pc
-    
-    # First message identifies the client
+
     try:
         raw = await asyncio.wait_for(websocket.recv(), timeout=10)
         data = json.loads(raw)
@@ -43,19 +41,35 @@ async def handler(websocket):
     elif role == "phone":
         _phones.add(websocket)
         print(f"[Relay] Phone connected — {len(_phones)} phone(s)")
+        # Send pong immediately so app shows ONLINE
+        await websocket.send(json.dumps({"type": "pong"}))
         try:
             async for raw in websocket:
-                # Forward phone messages to PC
-                if _pc:
-                    try:
-                        await _pc.send(raw)
-                    except Exception:
-                        pass
-                else:
-                    await websocket.send(json.dumps({
-                        "type": "error", 
-                        "msg": "PC not connected"
-                    }))
+                try:
+                    data = json.loads(raw)
+                    cmd = data.get("cmd", "")
+
+                    # Handle ping directly
+                    if cmd == "ping":
+                        await websocket.send(json.dumps({"type": "pong"}))
+                        continue
+
+                    # Forward everything else to PC
+                    if _pc:
+                        try:
+                            await _pc.send(raw)
+                        except Exception:
+                            await websocket.send(json.dumps({
+                                "type": "error",
+                                "msg": "Failed to send to PC"
+                            }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "msg": "PC not connected"
+                        }))
+                except Exception:
+                    pass
         except Exception:
             pass
         finally:
